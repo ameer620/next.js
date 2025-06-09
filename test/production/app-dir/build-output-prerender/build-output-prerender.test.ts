@@ -63,8 +63,7 @@ describe('build-output-prerender', () => {
               ✓ dynamicIO
               ⨯ turbopackMinify (disabled by \`--debug-prerender\`)
               ✓ serverSourceMaps (enabled by \`--debug-prerender\`)
-              ⨯ prerenderEarlyExit (disabled by \`--debug-prerender\`)
-              ✓ enablePrerenderSourceMaps (enabled by \`--debug-prerender\`)"
+              ⨯ prerenderEarlyExit (disabled by \`--debug-prerender\`)"
         `)
       } else {
         expect(getPreambleOutput(next.cliOutput)).toMatchInlineSnapshot(`
@@ -74,8 +73,7 @@ describe('build-output-prerender', () => {
               ✓ dynamicIO
               ✓ serverSourceMaps (enabled by \`--debug-prerender\`)
               ⨯ serverMinification (disabled by \`--debug-prerender\`)
-              ⨯ prerenderEarlyExit (disabled by \`--debug-prerender\`)
-              ✓ enablePrerenderSourceMaps (enabled by \`--debug-prerender\`)"
+              ⨯ prerenderEarlyExit (disabled by \`--debug-prerender\`)"
         `)
       }
     })
