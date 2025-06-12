@@ -996,14 +996,12 @@ impl PageEndpoint {
                     *project.per_page_module_graph().await?,
                 );
 
-                let client_module_assets = &self.client_module().ident().await?.assets;
-                for (_key, asset) in client_module_assets {
-                    println!("Client module asset: {:?}", asset.path().await?.path);
+                if let Some(app_module) = app_module {
+                    reduced_graphs
+                        .validate_pages_css_imports(self.client_module(), *app_module)
+                        .await?;
                 }
 
-                reduced_graphs
-                    .validate_pages_css_imports(self.client_module())
-                    .await?;
                 let next_dynamic_imports = reduced_graphs
                     .get_next_dynamic_imports_for_endpoint(self.client_module())
                     .await?;

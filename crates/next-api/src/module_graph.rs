@@ -1,4 +1,4 @@
-use std::{borrow::Cow, cell::RefCell, rc::Rc};
+use std::borrow::Cow;
 
 use anyhow::Result;
 use either::Either;
@@ -12,12 +12,13 @@ use next_core::{
 };
 use rustc_hash::FxHashMap;
 use tracing::Instrument;
+use turbo_rcstr::RcStr;
 use turbo_tasks::{
     CollectiblesSource, FxIndexMap, FxIndexSet, ReadRef, ResolvedVc, TryFlatJoinIterExt,
     TryJoinIterExt, Vc,
 };
 use turbo_tasks_fs::FileSystemPath;
-use turbopack::css::{CssModuleAsset, ModuleCssAsset};
+use turbopack::css::CssModuleAsset;
 use turbopack_core::{
     context::AssetContext,
     issue::{Issue, IssueExt, IssueSeverity, IssueStage, OptionStyledString, StyledString},
@@ -407,18 +408,15 @@ pub struct CssGlobalImportIssue {
     module: ResolvedVc<Box<dyn Module>>,
 }
 
-#[turbo_tasks::value_impl]
 impl CssGlobalImportIssue {
-    #[turbo_tasks::function]
     pub fn new(
         parent_module: ResolvedVc<Box<dyn Module>>,
         module: ResolvedVc<Box<dyn Module>>,
-    ) -> Vc<Self> {
+    ) -> Self {
         Self {
             parent_module,
             module,
         }
-        .cell()
     }
 }
 
@@ -426,33 +424,49 @@ impl CssGlobalImportIssue {
 impl Issue for CssGlobalImportIssue {
     #[turbo_tasks::function]
     async fn title(&self) -> Vc<StyledString> {
-        StyledString::Text(
-            format!(
-                "CSS global import in {}",
-                self.parent_module.ident().path().await.unwrap().path
-            )
-            .into(),
-        )
+        StyledString::Stack(vec![
+            StyledString::Text("Failed to compile".into()),
+            StyledString::Text(
+                "Global CSS cannot be imported from files other than your Custom <App>. Due to \
+                 the Global nature of stylesheets, and to avoid conflicts, Please move all \
+                 first-party global CSS imports to pages/_app.js. Or convert the import to \
+                 Component-Level CSS (CSS Modules)."
+                    .into(),
+            ),
+            StyledString::Text("Read more: https://nextjs.org/docs/messages/css-global".into()),
+        ])
         .cell()
     }
 
     #[turbo_tasks::function]
-    async fn description(&self) -> Vc<OptionStyledString> {
-        Vc::cell(Some(
-            StyledString::Text(
-                format!(
-                    "CSS global import in {}, cannot import {}",
-                    self.parent_module.ident().path().await.unwrap().path,
-                    self.module.ident().path().await.unwrap().path
-                )
-                .into(),
-            )
+    async fn description(&self) -> Result<Vc<OptionStyledString>> {
+        let parent_path = &self.parent_module.ident().path();
+        let module_path = &self.module.ident().path();
+        let relative_import_location = parent_path.parent().await?;
+
+        let import_path = match relative_import_location.get_relative_path_to(&*module_path.await?)
+        {
+            Some(path) => path,
+            None => module_path.await?.path.clone(),
+        };
+        let cleaned_import_path =
+            if import_path.ends_with(".scss.css") || import_path.ends_with(".sass.css") {
+                RcStr::from(import_path.trim_end_matches(".css"))
+            } else {
+                import_path
+            };
+
+        Ok(Vc::cell(Some(
+            StyledString::Stack(vec![
+                StyledString::Text(format!("Location: {}", parent_path.await?.path).into()),
+                StyledString::Text(format!("Import path: {cleaned_import_path}",).into()),
+            ])
             .resolved_cell(),
-        ))
+        )))
     }
 
     fn severity(&self) -> IssueSeverity {
-        IssueSeverity::Warning.into()
+        IssueSeverity::Error
     }
 
     #[turbo_tasks::function]
@@ -471,10 +485,11 @@ async fn validate_pages_css_imports(
     graph: Vc<SingleModuleGraph>,
     is_single_page: bool,
     entry: Vc<Box<dyn Module>>,
-    // TODO potentially more arguments
+    app_module: Vc<Box<dyn Module>>,
 ) -> Result<()> {
     let graph = &*graph.await?;
     let entry = entry.to_resolved().await?;
+    let app_module = app_module.to_resolved().await?;
 
     let entries = if !is_single_page {
         if !graph.entry_modules().any(|m| m == entry) {
@@ -486,9 +501,6 @@ async fn validate_pages_css_imports(
         Either::Right(graph.entry_modules())
     };
 
-    let issues = Rc::new(RefCell::new(Vec::new()));
-    let issues_ref = issues.clone();
-
     graph.traverse_edges_from_entries(entries, |parent_info, node| {
         let module = node.module;
         let Some((parent_node, _)) = parent_info else {
@@ -497,43 +509,17 @@ async fn validate_pages_css_imports(
         };
         let parent_module = parent_node.module;
 
-        // TODO validate parent_module -> module import
-
-        if parent_module == entry
+        if parent_module != app_module
             && ResolvedVc::try_downcast_type::<CssModuleAsset>(module).is_some()
         {
-            println!("css import found");
-        }
-        if parent_module != entry
-            && ResolvedVc::try_downcast_type::<CssModuleAsset>(module).is_some()
-        {
-            issues_ref
-                .borrow_mut()
-                .push(CssGlobalImportIssue::new(*parent_module, *module));
-            println!("css invalid global import found");
-        }
-        if parent_module != entry
-            && ResolvedVc::try_downcast_type::<ModuleCssAsset>(module).is_some()
-        {
-            println!("css valid module import found");
+            CssGlobalImportIssue::new(parent_module, module)
+                .resolved_cell()
+                .emit();
         }
 
         GraphTraversalAction::Continue
     })?;
 
-    CssGlobalImportIssue::new(*entry, *entry)
-        .to_resolved()
-        .await;
-
-    // resolve_issues(&issues.borrow()).await?;
-
-    Ok(())
-}
-
-async fn resolve_issues(issues: &[Vc<CssGlobalImportIssue>]) -> Result<()> {
-    for issue in issues.iter() {
-        issue.to_resolved().await?.emit();
-    }
     Ok(())
 }
 
@@ -727,7 +713,7 @@ impl ReducedGraphs {
     pub async fn validate_pages_css_imports(
         &self,
         entry: Vc<Box<dyn Module>>,
-        // TODO potentially more arguments
+        app_module: Vc<Box<dyn Module>>,
     ) -> Result<()> {
         let span = tracing::info_span!("validate pages css imports");
         async move {
@@ -736,7 +722,9 @@ impl ReducedGraphs {
                 .await?
                 .graphs
                 .iter()
-                .map(|graph| validate_pages_css_imports(**graph, self.is_single_page, entry))
+                .map(|graph| {
+                    validate_pages_css_imports(**graph, self.is_single_page, entry, app_module)
+                })
                 .try_join()
                 .await?;
 
