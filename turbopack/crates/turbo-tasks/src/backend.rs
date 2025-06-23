@@ -213,8 +213,6 @@ mod ser {
                 unreachable!();
             };
             let mut state = serializer.serialize_seq(Some(2))?;
-            // It would be a little tricky but we _could_ store the function id on the native_fn so
-            // that instead of a hashmap lookup this would be a memory access on the NativeFn
             state.serialize_element(&registry::get_function_global_name(native_fn))?;
             let arg = *arg;
             let arg = native_fn.arg_meta.as_serialize(arg);
