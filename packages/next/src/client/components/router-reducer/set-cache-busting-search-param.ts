@@ -42,6 +42,31 @@ export const setCacheBustingSearchParam = (
     return
   }
 
+  setCacheBustingSearchParamWithHash(url, uniqueCacheKey)
+}
+
+/**
+ * Sets a cache-busting search parameter on a URL using a provided hash value.
+ *
+ * This function performs the same logic as `setCacheBustingSearchParam` but accepts
+ * a pre-computed hash instead of computing it from headers.
+ *
+ * Example:
+ * URL before: https://example.com/path?query=1
+ * hash: "abc123"
+ * URL after: https://example.com/path?query=1&_rsc=abc123
+ *
+ * Note: This function mutates the input URL directly and does not return anything.
+ */
+export const setCacheBustingSearchParamWithHash = (
+  url: URL,
+  hash: string | null
+): void => {
+  if (!hash) {
+    // No hash provided, we don't need to set a cache-busting search param.
+    return
+  }
+
   /**
    * Note that we intentionally do not use `url.searchParams.set` here:
    *
@@ -64,6 +89,6 @@ export const setCacheBustingSearchParam = (
     .split('&')
     .filter((pair) => pair && !pair.startsWith(`${NEXT_RSC_UNION_QUERY}=`))
 
-  pairs.push(`${NEXT_RSC_UNION_QUERY}=${uniqueCacheKey}`)
+  pairs.push(`${NEXT_RSC_UNION_QUERY}=${hash}`)
   url.search = pairs.length ? `?${pairs.join('&')}` : ''
 }
