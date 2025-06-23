@@ -5,21 +5,16 @@ use once_cell::sync::Lazy;
 
 use crate::{
     FxDashMap, TraitType, ValueType,
-    id::{FunctionId, TraitTypeId, ValueTypeId},
+    id::{TraitTypeId, ValueTypeId},
     id_factory::IdFactory,
     native_function::NativeFunction,
     no_move_vec::NoMoveVec,
 };
 
-static FUNCTION_ID_FACTORY: IdFactory<FunctionId> = IdFactory::new_const(
-    FunctionId::MIN.to_non_zero_u64(),
-    FunctionId::MAX.to_non_zero_u64(),
-);
-static FUNCTIONS_BY_NAME: Lazy<FxDashMap<&'static str, FunctionId>> = Lazy::new(FxDashMap::default);
-static FUNCTIONS_BY_VALUE: Lazy<FxDashMap<&'static NativeFunction, FunctionId>> =
+static NAME_TO_FUNCTION: Lazy<FxDashMap<&'static str, &'static NativeFunction>> =
     Lazy::new(FxDashMap::default);
-static FUNCTIONS: Lazy<NoMoveVec<(&'static NativeFunction, &'static str)>> =
-    Lazy::new(NoMoveVec::new);
+static FUNCTION_TO_NAME: Lazy<FxDashMap<&'static NativeFunction, &'static str>> =
+    Lazy::new(FxDashMap::default);
 
 static VALUE_TYPE_ID_FACTORY: IdFactory<ValueTypeId> = IdFactory::new_const(
     ValueTypeId::MIN.to_non_zero_u64(),
@@ -80,31 +75,23 @@ where
     }
 }
 
+/// Registers a function so it is available for persistence
 pub fn register_function(global_name: &'static str, func: &'static NativeFunction) {
-    register_thing(
-        global_name,
-        func,
-        &FUNCTION_ID_FACTORY,
-        &FUNCTIONS,
-        &FUNCTIONS_BY_NAME,
-        &FUNCTIONS_BY_VALUE,
+    let prev = FUNCTION_TO_NAME.insert(func, global_name);
+    debug_assert!(prev.is_none(), "function {global_name} registered twice?");
+    let prev = NAME_TO_FUNCTION.insert(global_name, func);
+    debug_assert!(
+        prev.is_none(),
+        "registration mappings for {global_name} are inconsistent!"
     );
 }
 
-pub fn get_function_id(func: &'static NativeFunction) -> FunctionId {
-    get_thing_id(func, &FUNCTIONS_BY_VALUE)
+pub fn get_function_by_global_name(global_name: &str) -> &'static NativeFunction {
+    NAME_TO_FUNCTION.get(global_name).unwrap().value()
 }
 
-pub fn get_function_id_by_global_name(global_name: &str) -> Option<FunctionId> {
-    FUNCTIONS_BY_NAME.get(global_name).map(|x| *x)
-}
-
-pub fn get_function(id: FunctionId) -> &'static NativeFunction {
-    FUNCTIONS.get(*id as usize).unwrap().0
-}
-
-pub fn get_function_global_name(id: FunctionId) -> &'static str {
-    FUNCTIONS.get(*id as usize).unwrap().1
+pub fn get_function_global_name(func: &'static NativeFunction) -> &'static str {
+    FUNCTION_TO_NAME.get(&func).unwrap().value()
 }
 
 pub fn register_value_type(
